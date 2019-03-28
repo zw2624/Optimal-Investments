@@ -1,0 +1,280 @@
+---
+title: "Untitled"
+author: "Zihe Wang"
+date: "11/18/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, warning=FALSE, eval=FALSE}
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+
+### Real Data
+u = 1.007452567
+d = 0.992602563
+qu = 0.498143775
+qd = 1 - qu
+
+
+
+
+### generating probability matrix
+gen_prob_mat <- function(period = 10, start = NULL, seed = NULL){
+  if(!is.null(seed)){
+    set.seed(seed)
+  }
+  mat <- matrix(rep(0, period*2^period),nrow = 2^period, ncol = period)
+  if(is.null(start)){
+    pu <- runif(1, 0, 1)
+    pd <- 1 - pu
+    start <- c(pu, pd)
+  }
+  mat[1,1] <- start[1]
+  mat[2,1] <- start[2]
+  for (i in 2:period) {
+    for (j in 1:2^(i-1)) {
+      pu <- runif(1, 0, 1)
+      mat[2*j-1, i] <- pu
+      mat[2*j, i] <- 1 - pu
+    }
+  }
+  return(mat)
+}
+
+### generating xi matrix
+gen_xi_mat <- function(period = 10, volatility = 0.25, seed = NULL){
+  if(!is.null(seed)){
+    set.seed(seed)
+  }
+  mat <- matrix(rep(0, period*2^period),nrow = 2^period, ncol = period)
+  for (i in 1:period) {
+    for (j in 1:2^(i-1)) {
+      u <- rnorm(1, 1, volatility)
+      while (u <= 1) {
+        u <- rnorm(1, 1, volatility)
+      }
+      d <- rnorm(1, 1, volatility)
+      while (d >= 1 | d <= 0.5) {
+        d <- rnorm(1, 1, volatility)
+      }
+      mat[2*j-1, i] <- u
+      mat[2*j, i] <- d
+    }
+  }
+  return(mat)
+} 
+
+## utility function
+U <- function(x, h=0, r=1){
+  return(-exp(-r*x-h))
+}
+
+## helper function
+h <- function(q, p1, p2){
+  ret <- q*log(q/p1) + (1-q)*log((1-q)/p2)
+  return(ret)
+}
+
+### multi-period model
+# @param xi_mat: xi matrix
+# @param prob_mat: probability matrix
+# @param r: risk preference of assumed utility function
+
+
+
+solve_preference <- function(xi_mat, prob_mat, r=1){
+  period <- dim(xi_mat)[2]
+  #a <- (function(x) NULL)
+  #fun_mat <- matrix(rep(a, period*2^(period-1)), nrow = 2^(period-1), ncol = period) ## matrix stores functions
+  #return(fun_mat)
+  q_mat <- matrix(rep(0, period*2^(period-1)), nrow = 2^(period-1), ncol = period) ## matrix stores q_i
+  h_mat <- matrix(rep(0, period*2^period), nrow = 2^period, ncol = period) ## matrix stores h
+  ### value function at time T
+  #f <- function(x){return(U(x, 0, r))}
+  #fun_mat[2,1] <- f
+  ### start solving backwardly
+  for (i in (period-1):1) {
+    prob <- prob_mat[,i+1]
+    xi <- xi_mat[,i+1]
+    for (j in 1:2^(i-1)) {
+      ## calculating expected value
+      u <- xi[2*j-1]
+      d <- xi[2*j]
+      pu <- prob[2*j-1]
+      pd <- prob[2*j-1]
+      q <- (1-d)/(u-d)
+      q_mat[j,i] <- q
+      h <- h(q, pu/(pu+pd), pd/(pu+pd))
+      if(i != period - 1){
+        pre_h_u <- h_mat[2*j-1, i+1]
+        pre_h_d <- h_mat[2*j, i+1]
+        h <- h + q * pre_h_u + (1-q) * pre_h_d
+      }
+      h_mat[j,i] <- h
+      #f <- function(x){return(U(x, h, r))}
+      #fun_mat[j,i] <- deparse(f)
+    }
+  }
+  return(h_mat)
+}
+
+# @param xi_mat: xi matrix
+# @param prob_mat: probability matrix
+# @param times: number of simulation
+# require libraries: ggplot2, gganimate
+library(ggplot2)
+## if(!require(devtools)) install.packages("devtools")
+## devtools::install_github("dgrtwo/gganimate")
+library(gganimate) 
+
+simulate <- function(xi, prob, times=10){
+  period <- dim(xi)[2]
+  h_mat <- solve_preference(xi, prob)
+  ret_matrix <- NULL #data_frame(row.names = list('h_val', 'periods', 'times'))
+  ### run simulation and get resulting dataset (x, y to approximate functions)
+  for (run in 1:times)
+  {
+    h_path <- h_mat[1,1]
+    pos <- c(1,1)
+    x <- 4
+    wealth <- x
+    for (i in 1:(period-1)) {
+      j <- pos[1]
+      dice <- runif(1, 0, 1)
+      pu <- prob[2*j-1, i]
+      if(pu > dice){ ## stock price goes up
+        u <- xi[2*j-1, i]
+        pos <- c(2*j-1,i+1)
+        x <- x * u
+        cur_h <- h_mat[2*j-1,i+1]
+        h_path <- c(h_path, cur_h)
+      } else { ## stock price goes down
+        d <- xi[2*j, i]
+        pos <- c(2*j,i+1)
+        x <- x * d 
+        cur_h <- h_mat[2*j,i+1]
+        h_path <- c(h_path, cur_h)
+      }
+      wealth <- c(wealth, x)
+    }
+    cur_run_dat <- data.frame(h_val = h_path, periods = 1:period, times = rep(run, period), wea_val = wealth)
+    ret_matrix <- rbind(ret_matrix, cur_run_dat)
+  }
+  ret_matrix
+}
+
+### (x, y to approximate functions)
+cal_func <- function(p, t, mat){
+  h = mat[mat$periods == p & mat$times == t,]$h_val
+  x = seq(0.01, 10, 0.02)
+  r = 1
+  return(data_frame(x = x, y = U(x, h=h, r=r)))
+}
+
+
+cum_cal_func <- function(mat){
+  ps <- length(unique(mat$periods))
+  ts <- length(unique(mat$times))
+  dat_mat <- NULL
+  for(t in 1:ts){
+    w_memory = NULL
+    u_memory = NULL
+    for (p in 1:ps) {
+      h = mat[mat$periods == p & mat$times == t,]$h_val
+      w = mat[mat$periods == p & mat$times == t,]$wea_val
+      x = seq(1, 6, 0.01)
+      r = 1
+      y = U(x, h=h, r=r)
+      u = U(w, h=h, r=r)
+      n = length(x)
+      cur <- data.frame(x = x, y = y, simulations = rep(t, n), periods = rep(p, n), type = rep("function", n))
+      cur_w <-data.frame(x = w, y = u, simulations = t, periods = p, type = "current wealth")
+      pst_w <-data.frame(x = w_memory, y = u_memory, simulations = rep(t, length(w_memory)), 
+                                   periods = rep(p, length(w_memory)), 
+                                   type = rep("past wealth", length(w_memory)))
+      cur <- rbind(cur, cur_w)
+      cur <- rbind(cur, pst_w)
+      dat_mat <- rbind(dat_mat, cur)
+      w_memory <- c(w_memory, w)
+      u_memory <- c(u_memory, u)
+    }
+  }
+  dat_mat
+}
+
+### plot
+# require package `plotly`
+library(plotly)
+plot_simulation <- function(mat){
+  time <- length(unique(mat$times))
+  print("1")
+  ret_plots <- list()
+  for(run in 1:time){
+    df <- mat[mat$simulations == run,]
+    t <- df %>% 
+      plot_ly(
+        x = ~x, 
+        y = ~y,  
+        color = ~periods, 
+        frame = ~periods, 
+        type = 'scatter',
+        mode = 'lines',
+        symbol = ~type) 
+    ret_plots[[run]] <- t
+  }
+  print("2")
+  subplot(ret_plots, nrows = 2)
+}
+
+#### how to use
+xi <- gen_xi_mat(period = 10, seed = 1)
+prob <- gen_prob_mat(period = 10, seed = 1)
+periods = 1:(dim(xi)[2])
+times = 1:4
+my_matrix <- simulate(xi,prob, times = 4)
+dat_mat <- cum_cal_func(my_matrix)
+plot_simulation(dat_mat)
+
+
+
+
+###### static plot
+p = ggplot(df, aes(x = x, y = y, colour = factor(periods), group = factor(periods))) + 
+  geom_path() +
+  facet_wrap(~simulations , 
+             labeller = label_bquote(cols = simulations == .(simulations ))) +
+  xlab("wealth") + 
+  xlab("utility") + 
+  scale_colour_discrete(name = periods) +
+  theme(plot.title = element_text(hjust = 0.5))
+p
+
+
+
+run = 1
+df <- dat_mat[dat_mat$simulations == run & dat_mat$type == 'function',]
+ws <- dat_mat[dat_mat$simulations == run & dat_mat$type != 'function',]
+past_pt <- dat_mat[dat_mat$simulations == run & dat_mat$type == 'past wealth',]
+cur_pt <- dat_mat[dat_mat$simulations == run & dat_mat$type == 'current wealth',]
+
+t <- df %>% 
+  plot_ly(
+    x = ~x,
+    y = ~y,
+    #color = ~periods, 
+    frame = ~periods, 
+    type = 'scatter',
+    mode = 'lines') %>% 
+  add_markers(data = ws, x = ~x, y = ~y, type = "scatter") %>%
+  add_markers(data = cur_pt, x = ~x, y = ~y, symbol = I(1))
+t
+
+
+```
