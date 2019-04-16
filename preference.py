@@ -18,8 +18,8 @@ def solve_Backward(period, market_model, S0, gamma):
     @param gamma: a pre-assumed constant that represents the degree of risk preference of the utility function at Terminal time
     @return: a list contains h_0 (information related to utility function at time 0) and alpha0 (the initial investment)
     '''
-    u = market_model[0]
-    d = market_model[1]
+    u = market_model[0] + 1
+    d = market_model[1] + 1
     pu = market_model[2]
     pd = market_model[3]
     q = (1-d)/(u-d)
@@ -50,8 +50,8 @@ def solve_Forward(market_model, S0, gamma):
     @param gamma: a pre-assumed constant that represents the degree of risk preference of the utility function at Terminal time
     @return: a list contains h_0 (information related to utility function at time 0) and alpha0 (the initial investment)
     '''
-    u = market_model[0]
-    d = market_model[1]
+    u = market_model[0] + 1
+    d = market_model[1] + 1
     pu = market_model[2]
     pd = market_model[3]
     q = (1-d)/(u-d)

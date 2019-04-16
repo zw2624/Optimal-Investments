@@ -71,7 +71,6 @@ def get_market_model(sigma, w, useMC, prices = None):
     '''
     tau = w / 365
     u = np.exp(sigma*np.sqrt(tau))
-    print(u)
     d = 1 / u
     if useMC:
         pu = get_pu_MC(prices)[0]
