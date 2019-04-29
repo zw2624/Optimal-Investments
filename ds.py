@@ -77,6 +77,9 @@ def get_market_model(sigma, w, useMC, prices = None):
 
 
 def get_tri_market_model(sigma, w, lam):
+    '''
+    :param lam >= 1
+    '''
     tau = w / 365
     u = np.exp(sigma * np.sqrt(tau))
     V = lam * sigma * np.sqrt(tau)

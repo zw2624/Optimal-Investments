@@ -9,6 +9,7 @@ from itertools import product
 import scipy.optimize as opt
 import myprint
 import ds
+from bokeh.plotting import output_file, figure, show, save
 
 def get_util(alpha_vector, x, model_vector, price_vector):
     '''
@@ -57,8 +58,14 @@ for i in range(90, 100):
     # print(result)
     # print("complete iteration, current wealth is: " + str(x))
 
-print(x_list[-1])
-print(alpha_list)
+earning_1 = diff_list
+t1 = 'Multi Assets Forward'
+x = [i + 1 for i in range(len(earning_1))]
+return_1 = np.cumsum(earning_1)
+p = figure(x_range=(0, len(x) + 1), title = "Cumulative Earnings")
+p.line(x, return_1, line_width=2, legend=t1, line_color="blue")
+p.legend.location = "top_left"
+show(p)
 
 
 
