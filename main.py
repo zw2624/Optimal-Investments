@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 from itertools import product
 import scipy.optimize as opt
+import myprint
 import ds
-
 ''''
 
 Backward and Forward Comparison
@@ -15,16 +15,10 @@ import time
 from myprint import print_Runtime
 import ds
 import preference
-all_stock = pd.read_excel("./data/raw.xlsx")
-dates = np.array(all_stock['Date'])
-dates = dates[::-1]
 
-
-prices = np.array(all_stock['Adj Close'].values)
-prices = prices[::-1] # reverse the list; make the price f
-all_Close_prices = prices[2::5]  # length = 50
-
-
+all_stock = pd.read_csv("./data/GSPC.csv")
+prices = np.array(all_stock['Close'].values)
+all_Close_prices = prices[2::5]
 
 
 '''Weekly Investment'''
@@ -32,9 +26,11 @@ all_Close_prices = prices[2::5]  # length = 50
 train/test split.
 Totally there are 50 periods. We use first 40 as training and last 10 as validation
 '''
-train_prices_weekly = all_Close_prices[0:42]
-test_prices_weekly = all_Close_prices[42:]
-period = 8
+period = 12
+total = len(all_Close_prices)
+train_prices_weekly = all_Close_prices[0:(total-period)]
+test_prices_weekly = all_Close_prices[(total-period):]
+
 
 '''
 simulation
@@ -43,6 +39,7 @@ weekly_Backward_alpha = np.array([])
 weekly_Forward_alpha = np.array([])
 weekly_Backward_h = np.array([])
 weekly_Forward_h = np.array([])
+earning = np.array([])
 earning_b = np.array([])
 earning_f = np.array([])
 gamma = 1
@@ -50,8 +47,44 @@ time_back = []
 time_forward = []
 last_h = 0
 
+'''
 
-for i in range(period):
+'''
+info = ds.get_parameters(train_prices_weekly, 5)
+market_model = ds.get_market_model(info[1], 5, True, train_prices_weekly)
+
+time_origin = []
+t1 = time.clock()
+backward_matrix = preference.get_backward_matrix(period, market_model)
+t2 = time.clock()
+const_time = t2-t1
+
+S = train_prices_weekly[-1]
+S_assume = train_prices_weekly[-1]
+u = market_model[0] + 1
+d = market_model[1] + 1
+pu = market_model[2]
+pd = market_model[3]
+q = (1 - d) / (u - d)
+index = 0
+for i in range(period-1):
+    t1 = time.clock()
+    h_u = backward_matrix[i + 1][index + 1]
+    h_d = backward_matrix[i + 1][index + 1]
+    alpha = (np.log(pu / q) - np.log(pd / q) - (h_u - h_d)) / (gamma * S_assume * (u - d))
+    next_S = test_prices_weekly[i]
+    t2 = time.clock()
+    time_origin.append(t2 - t1)
+    earning = np.append(earning, alpha * (next_S - S))
+    index = index if next_S > S else index + 1
+    S_assume = S_assume * u if next_S > S else S_assume * d
+    S = next_S
+time_origin[0] += const_time
+
+'''
+
+'''
+for i in range(period-1):
     info = ds.get_parameters(train_prices_weekly, 5)  # calculate market estimates
     # disounted_train = parameter.get_discounted(train_prices_weekly, 1+info[2])  # discount the price
     weekly_market_model = ds.get_market_model(info[1], 5, True, train_prices_weekly) # get market model
@@ -71,24 +104,27 @@ for i in range(period):
     weekly_Backward_h = np.append(weekly_Backward_h, p_b[0]) # mark investment - backward
     weekly_Forward_h = np.append(weekly_Forward_h, p_f[0]) # mark investment - forward
 
-    real_C = all_Close_prices[i + 42]  # Get new Close Price
+    real_C = all_Close_prices[i + (total-period)]  # Get new Close Price
     earning_b = np.append(earning_b, weekly_Backward_alpha[-1] * (real_C - S0)) # record investment result
     earning_f = np.append(earning_f, weekly_Forward_alpha[-1] * (real_C - S0)) # record investment result
 
     train_prices_weekly = np.append(train_prices_weekly, test_prices_weekly[0]) # Update Training set
     test_prices_weekly = test_prices_weekly[1:] # Update Testing set
-#
-# print(time_back)
-# print(time_forward)
-# print_Runtime(time_back, time_forward)
+
 weekly_Forward_h_cum = [sum(weekly_Forward_h[0:i]) for i in range(len(weekly_Forward_h))]
 
-import myprint
+
+t_list_1 = [[time_back, "Backward with update"], [time_origin, "Classic Backward"]]
+print_Runtime(t_list_1, 'top_right')
+t_list_1.append([time_forward, "Forward Method"])
+print_Runtime(t_list_1, 'top_right')
 # myprint.print_Utility(True, weekly_Backward_h, gamma, 0, 0.5, 0.001)
 # myprint.print_Utility(False, weekly_Forward_h_cum, gamma, 0, 0.5, 0.001)
+e_list = [[earning_b, "Backward with update"], [earning, "Classic Backward"]]
+e_list = [[earning_b, "Backward with update"], [earning, "Classic Backward"],[earning_f, "Forward Method"]]
+# myprint.print_Earning(e_list)
 
-
-myprint.print_Earning(earning_f, earning_b)
+#myprint.print_Utility(False, weekly_Forward_h_cum, gamma, 0, 0.5, 0.001)
 
 
 '''
@@ -151,66 +187,5 @@ debug
 # # plt.show()
 
 
-''''
-
-Forward Multi-Assets
-
-'''
-
-def get_util(alpha_vector, x, model_vector, price_vector):
-    '''
-    @param alpha_vector: np.array. vector for alpha [a0_1, a0_2, ..]
-    @param model_vector: np.array. vector for model [(u1-1, d1-1, p1, 1-p1), (u2, d2, p2, 1-p2), ..]
-    @param price_vector: np.array. vector for Price [S_1, S_2, ..]
-    @return: 0 - Utility Value (because we want to use fmin in optimization)
-    '''
-    ret = 0
-    n = len(alpha_vector)
-    for w in list(product(range(2), repeat=n)):
-        S_diff = np.array([model_vector[i][w[i]] for i in range(n)]) * price_vector
-        X = x + sum(alpha_vector * S_diff)
-        p = sum(np.array([model_vector[i][2 + w[i]] for i in range(n)]))
-        ret += np.exp(-X) * p
-    return ret
 
 
-'''
-Read Data
-'''
-col_names = ['AAPL', 'AMZN', 'GOOG', 'NFLX', 'TSLA', 'WMT']
-weekly_Closes  = pd.DataFrame(columns = col_names)
-for name in col_names:
-    weekly_Closes[name] = ds.get_CloseFromRaw(name)
-
-
-n = len(weekly_Closes)
-ini_wealth = 0
-x = ini_wealth
-x_list = [x]
-alpha_list = []
-diff_list = []
-for i in range(90, 100):
-    train = weekly_Closes.iloc[0:i+1]
-    model_vector = [ds.get_model(np.array(train.iloc[:,j])) for j in range(len(col_names))]
-    prices_vector = np.array(train.iloc[i])
-    result = opt.fmin(get_util, np.zeros(len(col_names)), args=(x, model_vector, prices_vector))
-    alphas = result
-    alpha_list.append(alphas) # record investment strategy
-    real_Next_price = np.array(weekly_Closes.iloc[i+1])
-    diff = sum(np.array(alphas) * (real_Next_price - prices_vector))
-    x += diff
-    diff_list.append(diff)
-    x_list.append(x)
-    print(result)
-    print("complete iteration, current wealth is: " + str(x))
-
-print(x_list[-1])
-print(alpha_list)
-
-
-
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-
-plt.plot(diff_list)
-plt.show()

@@ -42,6 +42,37 @@ def solve_Backward(period, market_model, S0, gamma):
     alpha0 = (np.log(pu/q) - np.log(pd/q) - (h_1[0]-h_t[1])) / (gamma*S0*(u-d))
     return [h_0, alpha0]
 
+def get_backward_matrix(period, market_model):
+    '''
+    Get the solved H list of backward model
+    Used when calculating the classic Backward models
+    :return:
+    '''
+    u = market_model[0] + 1
+    d = market_model[1] + 1
+    pu = market_model[2]
+    pd = market_model[3]
+    q = (1-d)/(u-d)
+    h_list = []
+    h_t = np.zeros(period)
+    h_list.append(h_t)
+    for i in np.arange(period-1, 1, -1):
+        h_t_1 = np.zeros(i)
+        for j in range(i):
+            h = get_h_helper(q, pu, pd)
+            pre_h_u = h_t[j]
+            pre_h_d = h_t[j+1]
+            h += q * pre_h_u + (1-q) * pre_h_d
+            h_t_1[j] = h
+        h_list.insert(0, h_t_1)
+        h_t = h_t_1
+    h_1 = h_t
+    h_0 = get_h_helper(q, pu, pd) + q * h_1[0] + (1-q) * h_1[1]
+    h_list.insert(0, h_0)
+    return h_list
+
+
+
 def solve_Forward(market_model, S0, gamma):
     '''
     Solve Forward Preference
